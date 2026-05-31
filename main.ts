@@ -287,6 +287,10 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     }
 
     const sorted = [...items].sort((a, b) => this.compareItems(a, b, rule));
+    if (items.every((item, index) => item.path === sorted[index]?.path)) {
+      return;
+    }
+
     for (const item of sorted) {
       container.appendChild(item.el);
     }
