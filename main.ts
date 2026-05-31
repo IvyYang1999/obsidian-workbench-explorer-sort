@@ -37,6 +37,12 @@ interface DragState {
   parentPath: string;
 }
 
+interface ManualDropTarget {
+  path: string;
+  el: HTMLElement;
+  after: boolean;
+}
+
 interface SortableItem {
   path: string;
   name: string;
@@ -45,7 +51,16 @@ interface SortableItem {
   mtime: number;
   titleDate: number | null;
   originalIndex: number;
-  el: HTMLElement;
+  el?: HTMLElement;
+}
+
+interface FileTreeItem {
+  file: TAbstractFile;
+}
+
+interface FileExplorerView {
+  getSortedFolderItems(folder: TFolder): FileTreeItem[];
+  requestSort(): void;
 }
 
 const DEFAULT_SETTINGS: WorkbenchExplorerSortSettings = {
@@ -68,9 +83,11 @@ const MODE_LABELS: Record<SortMode, string> = {
 export default class WorkbenchExplorerSortPlugin extends Plugin {
   settings: WorkbenchExplorerSortSettings = DEFAULT_SETTINGS;
   private dragState: DragState | null = null;
+  private manualDropTarget: ManualDropTarget | null = null;
   private dropTargetEl: HTMLElement | null = null;
   private applyTimer: number | null = null;
   private observer: MutationObserver | null = null;
+  private unpatchExplorer: (() => void) | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -106,6 +123,7 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("delete", () => this.requestApplySort()));
 
     this.app.workspace.onLayoutReady(() => {
+      this.patchFileExplorer();
       this.startFileExplorerObserver();
       this.requestApplySort();
     });
@@ -116,6 +134,8 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
   onunload() {
     this.clearDropIndicator();
     this.observer?.disconnect();
+    this.unpatchExplorer?.();
+    this.unpatchExplorer = null;
     if (this.applyTimer !== null) {
       window.clearTimeout(this.applyTimer);
     }
@@ -175,29 +195,23 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     folderPath: string,
     current: SortRule | undefined
   ) {
-    const modes: SortMode[] = [
-      "manual",
-      "name-asc",
-      "name-desc",
-      "ctime-desc",
-      "ctime-asc",
-      "mtime-desc",
-      "mtime-asc",
-      "title-date-desc",
-      "title-date-asc",
-    ];
-
-    for (const mode of modes) {
-      menu.addItem((item) =>
-        item
-          .setTitle(MODE_LABELS[mode])
-          .setChecked(current?.mode === mode)
-          .onClick(async () => {
-            await this.setRule(folderPath, this.buildRule(folderPath, mode));
-            new Notice(`排序规则：${displayFolder(folderPath)} -> ${MODE_LABELS[mode]}`);
-          })
-      );
-    }
+    this.addModeItem(menu, folderPath, current, "manual");
+    this.addModeGroup(menu, folderPath, current, "名称", [
+      ["name-asc", "正序 A → Z"],
+      ["name-desc", "倒序 Z → A"],
+    ]);
+    this.addModeGroup(menu, folderPath, current, "创建时间", [
+      ["ctime-desc", "新 → 旧"],
+      ["ctime-asc", "旧 → 新"],
+    ]);
+    this.addModeGroup(menu, folderPath, current, "修改时间", [
+      ["mtime-desc", "新 → 旧"],
+      ["mtime-asc", "旧 → 新"],
+    ]);
+    this.addModeGroup(menu, folderPath, current, "标题日期", [
+      ["title-date-desc", "新 → 旧"],
+      ["title-date-asc", "旧 → 新"],
+    ]);
 
     menu.addSeparator();
     menu.addItem((item) =>
@@ -229,6 +243,45 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     );
   }
 
+  private addModeGroup(
+    menu: Menu,
+    folderPath: string,
+    current: SortRule | undefined,
+    title: string,
+    modes: Array<[SortMode, string]>
+  ) {
+    menu.addItem((item) => {
+      item.setTitle(title);
+      const submenu = getSubmenu(item);
+      if (!submenu) {
+        item.setDisabled(true);
+        return;
+      }
+
+      for (const [mode, label] of modes) {
+        this.addModeItem(submenu, folderPath, current, mode, label);
+      }
+    });
+  }
+
+  private addModeItem(
+    menu: Menu,
+    folderPath: string,
+    current: SortRule | undefined,
+    mode: SortMode,
+    label = MODE_LABELS[mode]
+  ) {
+    menu.addItem((item) =>
+      item
+        .setTitle(label)
+        .setChecked(current?.mode === mode)
+        .onClick(async () => {
+          await this.setRule(folderPath, this.buildRule(folderPath, mode));
+          new Notice(`排序规则：${displayFolder(folderPath)} -> ${MODE_LABELS[mode]}`);
+        })
+    );
+  }
+
   private buildRule(folderPath: string, mode: SortMode): SortRule {
     if (mode !== "manual") {
       return { mode };
@@ -254,12 +307,18 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       return;
     }
 
-    this.observer = new MutationObserver(() => this.requestApplySort());
+    this.observer = new MutationObserver(() => {
+      if (!this.unpatchExplorer) {
+        this.patchFileExplorer();
+      }
+    });
     this.observer.observe(workspace, { childList: true, subtree: true });
     this.register(() => this.observer?.disconnect());
   }
 
   private requestApplySort() {
+    this.requestExplorerSort();
+
     if (this.applyTimer !== null) {
       window.clearTimeout(this.applyTimer);
     }
@@ -267,6 +326,50 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       this.applyTimer = null;
       this.applyAllSorts();
     }, 60);
+  }
+
+  private requestExplorerSort() {
+    this.patchFileExplorer();
+    this.getFileExplorerView()?.requestSort();
+  }
+
+  private patchFileExplorer() {
+    if (this.unpatchExplorer) {
+      return;
+    }
+
+    const view = this.getFileExplorerView();
+    if (!view) {
+      return;
+    }
+
+    const proto = Object.getPrototypeOf(view) as FileExplorerView;
+    const originalGetSortedFolderItems = proto.getSortedFolderItems;
+    if (typeof originalGetSortedFolderItems !== "function") {
+      return;
+    }
+
+    const plugin = this;
+    proto.getSortedFolderItems = function (folder: TFolder): FileTreeItem[] {
+      const items = originalGetSortedFolderItems.call(this, folder);
+      const rule = plugin.settings.rules[normalizeFolderPath(folder.path)];
+      if (!rule) {
+        return items;
+      }
+
+      return plugin.sortFileTreeItems(items, rule);
+    };
+
+    this.unpatchExplorer = () => {
+      proto.getSortedFolderItems = originalGetSortedFolderItems;
+    };
+  }
+
+  private getFileExplorerView(): FileExplorerView | null {
+    const leaf = this.app.workspace.getLeavesOfType("file-explorer")[0];
+    const view = leaf?.view as unknown;
+
+    return isFileExplorerView(view) ? view : null;
   }
 
   private applyAllSorts() {
@@ -292,8 +395,20 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     }
 
     for (const item of sorted) {
-      container.appendChild(item.el);
+      if (item.el) {
+        container.appendChild(item.el);
+      }
     }
+  }
+
+  private sortFileTreeItems(items: FileTreeItem[], rule: SortRule): FileTreeItem[] {
+    return items
+      .map((item, originalIndex) => ({
+        item,
+        sortable: this.toSortableItem(item.file, originalIndex),
+      }))
+      .sort((a, b) => this.compareItems(a.sortable, b.sortable, rule))
+      .map(({ item }) => item);
   }
 
   private compareItems(a: SortableItem, b: SortableItem, rule: SortRule): number {
@@ -319,7 +434,7 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
   private collectSortableItems(container: HTMLElement): SortableItem[] {
     return Array.from(container.children)
       .filter((child): child is HTMLElement => child instanceof HTMLElement)
-      .map((el, originalIndex) => {
+      .map((el, originalIndex): SortableItem | null => {
         const path = this.getPathForTreeItem(el);
         if (!path) {
           return null;
@@ -330,18 +445,25 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
         }
 
         const stats = getStats(file);
-        return {
-          path,
-          name: file.name,
-          type: file instanceof TFolder ? "folder" : "file",
-          ctime: stats.ctime,
-          mtime: stats.mtime,
-          titleDate: parseTitleDate(file.name),
-          originalIndex,
-          el,
-        };
+        return { ...this.toSortableItem(file, originalIndex, stats), el };
       })
       .filter((item): item is SortableItem => Boolean(item));
+  }
+
+  private toSortableItem(
+    file: TAbstractFile,
+    originalIndex: number,
+    stats = getStats(file)
+  ): SortableItem {
+    return {
+      path: file.path,
+      name: file.name,
+      type: file instanceof TFolder ? "folder" : "file",
+      ctime: stats.ctime,
+      mtime: stats.mtime,
+      titleDate: parseTitleDate(file.name),
+      originalIndex,
+    };
   }
 
   private findFolderChildrenContainer(folderPath: string): HTMLElement | null {
@@ -403,10 +525,12 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
   private onDragOver = (event: DragEvent) => {
     const target = this.getManualDropTarget(event);
     if (!target) {
+      this.manualDropTarget = null;
       this.clearDropIndicator();
       return;
     }
 
+    this.manualDropTarget = target;
     event.preventDefault();
     event.stopPropagation();
     setDropEffect(event, "move");
@@ -414,9 +538,10 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
   };
 
   private onDrop = async (event: DragEvent) => {
-    const target = this.getManualDropTarget(event);
+    const target = this.manualDropTarget ?? this.getManualDropTarget(event);
     if (!target || !this.dragState) {
       this.clearDropIndicator();
+      this.manualDropTarget = null;
       this.dragState = null;
       return;
     }
@@ -432,17 +557,19 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       target.after
     );
     this.clearDropIndicator();
+    this.manualDropTarget = null;
     this.dragState = null;
   };
 
   private onDragEnd = () => {
     this.clearDropIndicator();
+    this.manualDropTarget = null;
     this.dragState = null;
   };
 
   private getManualDropTarget(
     event: DragEvent
-  ): { path: string; el: HTMLElement; after: boolean } | null {
+  ): ManualDropTarget | null {
     if (!this.dragState) {
       return null;
     }
@@ -590,6 +717,14 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
 function getSubmenu(item: unknown): Menu | null {
   const candidate = item as { setSubmenu?: () => Menu };
   return typeof candidate.setSubmenu === "function" ? candidate.setSubmenu() : null;
+}
+
+function isFileExplorerView(view: unknown): view is FileExplorerView {
+  const candidate = view as Partial<FileExplorerView> | null | undefined;
+  return (
+    typeof candidate?.getSortedFolderItems === "function" &&
+    typeof candidate.requestSort === "function"
+  );
 }
 
 function normalizeFolderPath(path: string): string {
