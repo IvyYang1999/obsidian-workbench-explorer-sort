@@ -1,0 +1,10 @@
+{
+  "id": "workbench-explorer-sort",
+  "name": "Workbench Explorer Sort",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Sort Obsidian File Explorer folders manually by direct drag-and-drop or with common Finder-style rules.",
+  "author": "IvyYang1999",
+  "authorUrl": "https://github.com/IvyYang1999",
+  "isDesktopOnly": true
+}

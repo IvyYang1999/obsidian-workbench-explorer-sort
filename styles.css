@@ -1,0 +1,7 @@
+.workbench-explorer-sort-drop-before {
+  box-shadow: inset 0 2px 0 var(--interactive-accent);
+}
+
+.workbench-explorer-sort-drop-after {
+  box-shadow: inset 0 -2px 0 var(--interactive-accent);
+}

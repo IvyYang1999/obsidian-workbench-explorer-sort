@@ -1,0 +1,21 @@
+{
+  "name": "obsidian-workbench-explorer-sort",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Direct, rule-based sorting for Obsidian's File Explorer.",
+  "main": "main.js",
+  "bin": {
+    "workbench-sort": "cli.js"
+  },
+  "scripts": {
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.23.0",
+    "obsidian": "^1.5.12",
+    "typescript": "^5.4.3"
+  }
+}
