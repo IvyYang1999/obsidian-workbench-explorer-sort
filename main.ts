@@ -452,28 +452,50 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       return null;
     }
 
-    const title = this.findTreeTitle(event.target);
-    const path = title?.dataset.path;
-    if (!title || !path || path === this.dragState.sourcePath) {
+    const container = this.findFolderChildrenContainer(this.dragState.parentPath);
+    if (!container || !this.isPointerInExplorer(event, container)) {
       return null;
     }
 
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!file) {
-      return null;
+    let best:
+      | { path: string; el: HTMLElement; after: boolean; distance: number }
+      | null = null;
+
+    for (const child of Array.from(container.children)) {
+      if (!(child instanceof HTMLElement)) {
+        continue;
+      }
+
+      const title = this.getTreeItemTitle(child);
+      const path = title?.dataset.path;
+      if (!title || !path || path === this.dragState.sourcePath) {
+        continue;
+      }
+
+      const file = this.app.vault.getAbstractFileByPath(path);
+      const parentPath = normalizeFolderPath(file?.parent?.path ?? "");
+      if (!file || parentPath !== this.dragState.parentPath) {
+        continue;
+      }
+
+      const rect = title.getBoundingClientRect();
+      const edgeSize = dropEdgeSize(rect);
+      const topDistance = Math.abs(event.clientY - rect.top);
+      const bottomDistance = Math.abs(event.clientY - rect.bottom);
+
+      if (topDistance <= edgeSize && topDistance < (best?.distance ?? Infinity)) {
+        best = { path, el: title, after: false, distance: topDistance };
+      }
+
+      if (
+        bottomDistance <= edgeSize &&
+        bottomDistance < (best?.distance ?? Infinity)
+      ) {
+        best = { path, el: title, after: true, distance: bottomDistance };
+      }
     }
 
-    const parentPath = normalizeFolderPath(file.parent?.path ?? "");
-    if (parentPath !== this.dragState.parentPath) {
-      return null;
-    }
-
-    const rect = title.getBoundingClientRect();
-    return {
-      path,
-      el: title,
-      after: event.clientY > rect.top + rect.height / 2,
-    };
+    return best;
   }
 
   private async saveManualDropOrder(
@@ -508,6 +530,17 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     return this.findTreeTitle(target)?.dataset.path ?? null;
   }
 
+  private isPointerInExplorer(event: DragEvent, container: HTMLElement): boolean {
+    const explorer = container.closest<HTMLElement>(
+      ".workspace-leaf-content[data-type='file-explorer']"
+    );
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+
+    return Boolean(
+      explorer && target instanceof HTMLElement && explorer.contains(target)
+    );
+  }
+
   private findTreeTitle(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof HTMLElement)) {
       return null;
@@ -516,6 +549,15 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     return target.closest<HTMLElement>(
       ".nav-file-title[data-path], .nav-folder-title[data-path]"
     );
+  }
+
+  private getTreeItemTitle(el: HTMLElement): HTMLElement | null {
+    return Array.from(el.children).find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement &&
+        (child.classList.contains("nav-file-title") ||
+          child.classList.contains("nav-folder-title"))
+    ) ?? null;
   }
 
   private showDropIndicator(el: HTMLElement, after: boolean) {
@@ -556,6 +598,10 @@ function normalizeFolderPath(path: string): string {
 
 function displayFolder(path: string): string {
   return path || "Vault root";
+}
+
+function dropEdgeSize(rect: DOMRect): number {
+  return Math.min(10, Math.max(6, rect.height * 0.3));
 }
 
 function findTreeTitleByPath(
