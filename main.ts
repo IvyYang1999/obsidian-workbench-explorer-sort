@@ -61,6 +61,8 @@ interface FileTreeItem {
 interface FileExplorerView {
   getSortedFolderItems(folder: TFolder): FileTreeItem[];
   requestSort(): void;
+  sort?: () => void;
+  lastDropTargetEl?: HTMLElement | null;
 }
 
 const DEFAULT_SETTINGS: WorkbenchExplorerSortSettings = {
@@ -113,6 +115,7 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     this.registerDomEvent(document, "dragover", this.onDragOver, {
       capture: true,
     });
+    this.registerDomEvent(document, "drag", this.onDrag, { capture: true });
     this.registerDomEvent(document, "drop", this.onDrop, { capture: true });
     this.registerDomEvent(document, "dragend", this.onDragEnd, {
       capture: true,
@@ -330,7 +333,9 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
 
   private requestExplorerSort() {
     this.patchFileExplorer();
-    this.getFileExplorerView()?.requestSort();
+    const view = this.getFileExplorerView();
+    view?.requestSort();
+    view?.sort?.();
   }
 
   private patchFileExplorer() {
@@ -520,9 +525,28 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     const file = this.app.vault.getAbstractFileByPath(path);
     const parentPath = normalizeFolderPath(file?.parent?.path ?? "");
     this.dragState = { sourcePath: path, parentPath };
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
   };
 
   private onDragOver = (event: DragEvent) => {
+    this.updateManualDropTarget(event);
+    if (!this.manualDropTarget) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    setDropEffect(event, "move");
+  };
+
+  private onDrag = (event: DragEvent) => {
+    this.updateManualDropTarget(event);
+  };
+
+  private updateManualDropTarget(event: DragEvent) {
     const target = this.getManualDropTarget(event);
     if (!target) {
       this.manualDropTarget = null;
@@ -531,11 +555,9 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     }
 
     this.manualDropTarget = target;
-    event.preventDefault();
-    event.stopPropagation();
-    setDropEffect(event, "move");
+    this.clearNativeFileExplorerDropTarget();
     this.showDropIndicator(target.el, target.after);
-  };
+  }
 
   private onDrop = async (event: DragEvent) => {
     const target = this.manualDropTarget ?? this.getManualDropTarget(event);
@@ -584,6 +606,15 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       return null;
     }
 
+    this.clearNativeFileExplorerDropTarget();
+
+    const hoveredTitle = this.findTreeTitle(
+      document.elementFromPoint(event.clientX, event.clientY)
+    );
+    if (hoveredTitle && this.isFolderMoveBand(event, hoveredTitle)) {
+      return null;
+    }
+
     let best:
       | { path: string; el: HTMLElement; after: boolean; distance: number }
       | null = null;
@@ -606,7 +637,7 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       }
 
       const rect = title.getBoundingClientRect();
-      const edgeSize = dropEdgeSize(rect);
+      const edgeSize = sortBandSize(rect);
       const topDistance = Math.abs(event.clientY - rect.top);
       const bottomDistance = Math.abs(event.clientY - rect.bottom);
 
@@ -623,6 +654,27 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     }
 
     return best;
+  }
+
+  private isFolderMoveBand(event: DragEvent, title: HTMLElement): boolean {
+    if (!title.classList.contains("nav-folder-title")) {
+      return false;
+    }
+
+    const path = title.dataset.path;
+    if (!path) {
+      return false;
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFolder)) {
+      return false;
+    }
+
+    const rect = title.getBoundingClientRect();
+    const center = rect.top + rect.height / 2;
+    const moveBand = Math.max(4, rect.height * 0.16);
+    return Math.abs(event.clientY - center) <= moveBand / 2;
   }
 
   private async saveManualDropOrder(
@@ -666,6 +718,13 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     return Boolean(
       explorer && target instanceof HTMLElement && explorer.contains(target)
     );
+  }
+
+  private clearNativeFileExplorerDropTarget() {
+    const view = this.getFileExplorerView();
+    if (view && "lastDropTargetEl" in view) {
+      view.lastDropTargetEl = null;
+    }
   }
 
   private findTreeTitle(target: EventTarget | null): HTMLElement | null {
@@ -735,8 +794,8 @@ function displayFolder(path: string): string {
   return path || "Vault root";
 }
 
-function dropEdgeSize(rect: DOMRect): number {
-  return Math.min(10, Math.max(6, rect.height * 0.3));
+function sortBandSize(rect: DOMRect): number {
+  return Math.max(10, rect.height * 0.46);
 }
 
 function findTreeTitleByPath(
