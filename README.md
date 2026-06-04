@@ -2,8 +2,8 @@
 
 Simple sorting controls for Obsidian's File Explorer.
 
-Workbench Explorer Sort adds per-folder sorting rules to the native Obsidian
-file tree. Set a rule from the File Explorer context menu, and the plugin keeps
+Workbench Explorer Sort adds per-folder sorting rules to the native file tree.
+Set a rule from the File Explorer context menu, and the plugin keeps
 that folder ordered by name, created time, or modified time.
 
 ## Features
