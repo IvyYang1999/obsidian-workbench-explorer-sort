@@ -20,14 +20,10 @@ type SortMode =
   | "ctime-desc"
   | "ctime-asc"
   | "mtime-desc"
-  | "mtime-asc"
-  | "title-date-desc"
-  | "title-date-asc"
-  | "custom";
+  | "mtime-asc";
 
 interface SortRule {
   mode: SortMode;
-  customRule?: string;
 }
 
 interface PluginSettings {
@@ -36,10 +32,8 @@ interface PluginSettings {
 
 interface SortableItem {
   name: string;
-  type: "file" | "folder";
   ctime: number;
   mtime: number;
-  titleDate: number | null;
   originalIndex: number;
 }
 
@@ -66,9 +60,6 @@ const MODE_LABELS: Record<SortMode, string> = {
   "ctime-asc": "创建时间 旧 → 新",
   "mtime-desc": "修改时间 新 → 旧",
   "mtime-asc": "修改时间 旧 → 新",
-  "title-date-desc": "标题日期 新 → 旧",
-  "title-date-asc": "标题日期 旧 → 新",
-  custom: "自定义规则...",
 };
 
 const LOG = "[WorkbenchSort]";
@@ -181,25 +172,7 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
       ["mtime-desc", "新 → 旧"],
       ["mtime-asc", "旧 → 新"],
     ]);
-    this.addModeGroup(menu, folderPath, current, "标题日期", [
-      ["title-date-desc", "新 → 旧"],
-      ["title-date-asc", "旧 → 新"],
-    ]);
     menu.addSeparator();
-    menu.addItem((item) =>
-      item
-        .setTitle("自定义规则...")
-        .setIcon("braces")
-        .onClick(async () => {
-          const rule = window.prompt(
-            "输入排序规则（逗号分隔）\n示例：folders-first, title-date desc, name asc",
-            current?.customRule ?? "folders-first, title-date desc, name asc"
-          );
-          if (!rule) return;
-          await this.setRule(folderPath, { mode: "custom", customRule: rule });
-          new Notice(`自定义排序规则已保存：${displayFolder(folderPath)}`);
-        })
-    );
     menu.addItem((item) =>
       item
         .setTitle("清除排序规则")
@@ -333,10 +306,8 @@ function toSortable(file: TAbstractFile, idx: number): SortableItem {
   const stats = getStats(file);
   return {
     name: file.name,
-    type: file instanceof TFolder ? "folder" : "file",
     ctime: stats.ctime,
     mtime: stats.mtime,
-    titleDate: parseTitleDate(file.name),
     originalIndex: idx,
   };
 }
@@ -346,9 +317,6 @@ function compareItems(
   b: SortableItem,
   rule: SortRule
 ): number {
-  if (rule.mode === "custom") {
-    return compareByCustomRule(a, b, rule.customRule ?? "");
-  }
   return compareByMode(a, b, rule.mode);
 }
 
@@ -370,51 +338,9 @@ function compareByMode(
       return cmpNum(b.mtime, a.mtime) || cmpName(a, b);
     case "mtime-asc":
       return cmpNum(a.mtime, b.mtime) || cmpName(a, b);
-    case "title-date-desc":
-      return cmpNullNum(b.titleDate, a.titleDate) || cmpName(a, b);
-    case "title-date-asc":
-      return cmpNullNum(a.titleDate, b.titleDate) || cmpName(a, b);
     default:
       return a.originalIndex - b.originalIndex;
   }
-}
-
-function compareByCustomRule(
-  a: SortableItem,
-  b: SortableItem,
-  rule: string
-): number {
-  for (const raw of rule.split(",")) {
-    const clause = raw.trim().toLowerCase();
-    if (!clause) continue;
-    let r = 0;
-    if (clause === "folders-first")
-      r = cmpNum(typeRank(a, true), typeRank(b, true));
-    else if (clause === "files-first")
-      r = cmpNum(typeRank(a, false), typeRank(b, false));
-    else if (clause === "name asc") r = cmpName(a, b);
-    else if (clause === "name desc") r = cmpName(b, a);
-    else if (clause === "title-date desc")
-      r = cmpNullNum(b.titleDate, a.titleDate);
-    else if (clause === "title-date asc")
-      r = cmpNullNum(a.titleDate, b.titleDate);
-    else if (clause === "mtime desc") r = cmpNum(b.mtime, a.mtime);
-    else if (clause === "mtime asc") r = cmpNum(a.mtime, b.mtime);
-    else if (clause === "ctime desc") r = cmpNum(b.ctime, a.ctime);
-    else if (clause === "ctime asc") r = cmpNum(a.ctime, b.ctime);
-    if (r !== 0) return r;
-  }
-  return cmpName(a, b);
-}
-
-function typeRank(item: SortableItem, foldersFirst: boolean): number {
-  return item.type === "folder"
-    ? foldersFirst
-      ? 0
-      : 1
-    : foldersFirst
-      ? 1
-      : 0;
 }
 
 function cmpName(a: SortableItem, b: SortableItem): number {
@@ -426,13 +352,6 @@ function cmpName(a: SortableItem, b: SortableItem): number {
 
 function cmpNum(a: number, b: number): number {
   return a === b ? 0 : a < b ? -1 : 1;
-}
-
-function cmpNullNum(a: number | null, b: number | null): number {
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return cmpNum(a, b);
 }
 
 function getStats(file: TAbstractFile): { ctime: number; mtime: number } {
@@ -447,13 +366,6 @@ function getStats(file: TAbstractFile): { ctime: number; mtime: number } {
     };
   }
   return { ctime: 0, mtime: 0 };
-}
-
-function parseTitleDate(name: string): number | null {
-  const m = name.match(/(20\d{2})[.\-/年](\d{1,2})[.\-/月](\d{1,2})/);
-  if (!m) return null;
-  const t = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
-  return Number.isNaN(t) ? null : t;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -484,11 +396,7 @@ class SortSettingTab extends PluginSettingTab {
     for (const [folder, rule] of rules) {
       new Setting(containerEl)
         .setName(displayFolder(folder))
-        .setDesc(
-          rule.mode === "custom"
-            ? rule.customRule ?? "Custom"
-            : MODE_LABELS[rule.mode]
-        )
+        .setDesc(MODE_LABELS[rule.mode])
         .addButton((btn) =>
           btn.setButtonText("清除").onClick(async () => {
             await this.plugin.clearRule(folder);

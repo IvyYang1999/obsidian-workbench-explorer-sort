@@ -12,9 +12,6 @@ const VALID_MODES = new Set([
   "ctime-asc",
   "mtime-desc",
   "mtime-asc",
-  "title-date-desc",
-  "title-date-asc",
-  "custom",
 ]);
 
 function main() {
@@ -48,13 +45,6 @@ function main() {
     }
     data.rules ??= {};
     data.rules[folder] = { mode };
-    if (mode === "custom") {
-      const rule = args.slice(2).join(" ").trim();
-      if (!rule) {
-        die("Custom mode requires a rule string.");
-      }
-      data.rules[folder].customRule = rule;
-    }
     writeData(dataFile, data);
     console.log(`Set ${folder || "Vault root"} -> ${mode}`);
     return;
@@ -121,7 +111,7 @@ function printHelp() {
 Usage:
   workbench-sort list [--vault <path>]
   workbench-sort get <folder> [--vault <path>]
-  workbench-sort set <folder> <mode> [custom rule] [--vault <path>]
+  workbench-sort set <folder> <mode> [--vault <path>]
   workbench-sort clear <folder> [--vault <path>]
 
 Modes:
@@ -131,9 +121,6 @@ Modes:
   ctime-asc
   mtime-desc
   mtime-asc
-  title-date-desc
-  title-date-asc
-  custom
 `);
 }
 

@@ -1,17 +1,15 @@
 # Workbench Explorer Sort
 
-Rule-based sorting controls for Obsidian's File Explorer.
+Simple sorting controls for Obsidian's File Explorer.
 
 Workbench Explorer Sort adds per-folder sorting rules to the native Obsidian
 file tree. Set a rule from the File Explorer context menu, and the plugin keeps
-that folder ordered by name, created time, modified time, title date, or a
-custom rule sequence.
+that folder ordered by name, created time, or modified time.
 
 ## Features
 
 - Adds a **Sort rules** submenu to File Explorer right-click menus.
-- Supports common Finder-style rules: name, created time, modified time, and title date.
-- Supports custom comma-separated rules such as `folders-first, title-date desc, name asc`.
+- Supports common Finder-style rules: name, created time, and modified time.
 - Stores rules locally in the plugin data file.
 - Includes a CLI for agents and scripts.
 
@@ -24,27 +22,6 @@ Available rules:
 - **Name**: A to Z or Z to A.
 - **Created time**: newest first or oldest first.
 - **Modified time**: newest first or oldest first.
-- **Title date**: newest first or oldest first, based on dates in filenames such as `2026.6.4`.
-- **Custom rule**: a comma-separated sequence evaluated from left to right.
-
-Custom rule clauses:
-
-- `folders-first`
-- `files-first`
-- `name asc`
-- `name desc`
-- `title-date asc`
-- `title-date desc`
-- `mtime asc`
-- `mtime desc`
-- `ctime asc`
-- `ctime desc`
-
-Example:
-
-```bash
-folders-first, title-date desc, name asc
-```
 
 ## CLI
 
@@ -54,7 +31,6 @@ Run commands from a vault root:
 ```bash
 node .obsidian/plugins/workbench-explorer-sort/cli.js list
 node .obsidian/plugins/workbench-explorer-sort/cli.js set "日记" name-desc
-node .obsidian/plugins/workbench-explorer-sort/cli.js set "日记" custom "folders-first, title-date desc, name asc"
 node .obsidian/plugins/workbench-explorer-sort/cli.js clear "日记"
 ```
 
@@ -66,9 +42,6 @@ Modes:
 - `ctime-asc`
 - `mtime-desc`
 - `mtime-asc`
-- `title-date-desc`
-- `title-date-asc`
-- `custom`
 
 ## Installation
 

@@ -1,9 +1,9 @@
 {
   "id": "workbench-explorer-sort",
   "name": "Workbench Explorer Sort",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minAppVersion": "1.5.0",
-  "description": "Sort Obsidian File Explorer folders with Finder-style and custom rules.",
+  "description": "Sort Obsidian File Explorer folders by name, created time, or modified time.",
   "author": "IvyYang1999",
   "authorUrl": "https://github.com/IvyYang1999",
   "isDesktopOnly": true
