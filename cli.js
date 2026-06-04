@@ -6,7 +6,6 @@ const path = require("path");
 const PLUGIN_ID = "workbench-explorer-sort";
 const DATA_PATH = path.join(".obsidian", "plugins", PLUGIN_ID, "data.json");
 const VALID_MODES = new Set([
-  "manual",
   "name-asc",
   "name-desc",
   "ctime-desc",
@@ -58,19 +57,6 @@ function main() {
     }
     writeData(dataFile, data);
     console.log(`Set ${folder || "Vault root"} -> ${mode}`);
-    return;
-  }
-
-  if (command === "order") {
-    const folder = normalizeFolder(required(args, 0, "folder"));
-    const order = args.slice(1);
-    if (order.length === 0) {
-      die("order requires at least one child name.");
-    }
-    data.rules ??= {};
-    data.rules[folder] = { mode: "manual", order };
-    writeData(dataFile, data);
-    console.log(`Saved manual order for ${folder || "Vault root"} (${order.length} items)`);
     return;
   }
 
@@ -136,11 +122,9 @@ Usage:
   workbench-sort list [--vault <path>]
   workbench-sort get <folder> [--vault <path>]
   workbench-sort set <folder> <mode> [custom rule] [--vault <path>]
-  workbench-sort order <folder> <child> [child...] [--vault <path>]
   workbench-sort clear <folder> [--vault <path>]
 
 Modes:
-  manual
   name-asc
   name-desc
   ctime-desc
