@@ -2,7 +2,7 @@
   "id": "workbench-explorer-sort",
   "name": "Workbench Explorer Sort",
   "version": "0.1.4",
-  "minAppVersion": "1.5.0",
+  "minAppVersion": "1.13.0",
   "description": "Sort file explorer folders by name, created time, or modified time.",
   "author": "IvyYang1999",
   "authorUrl": "https://github.com/IvyYang1999",

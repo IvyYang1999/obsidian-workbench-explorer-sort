@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workbench Explorer Sort demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #0c0d11;
+      --panel: #17181d;
+      --panel-2: #1e2026;
+      --line: #2b2e36;
+      --muted: #8d929f;
+      --text: #f5f6f8;
+      --accent: #a78bfa;
+      --accent-strong: #8b5cf6;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 1200px;
+      height: 800px;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 18% 10%, rgba(139, 92, 246, .16), transparent 34%),
+        radial-gradient(circle at 90% 86%, rgba(96, 165, 250, .08), transparent 32%),
+        var(--bg);
+    }
+
+    .stage {
+      position: relative;
+      width: 1080px;
+      height: 680px;
+      border: 1px solid rgba(255, 255, 255, .09);
+      border-radius: 24px;
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow: 0 32px 90px rgba(0, 0, 0, .48);
+    }
+
+    .titlebar {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--line);
+      background: #121318;
+    }
+
+    .dot { width: 11px; height: 11px; border-radius: 999px; }
+    .dot.red { background: #ff6b69; }
+    .dot.yellow { background: #f2bf4f; }
+    .dot.green { background: #63c174; }
+    .window-title { margin-left: 10px; color: #a9adb7; font-size: 14px; font-weight: 600; }
+
+    .workspace { display: grid; grid-template-columns: 430px 1fr; height: 626px; }
+
+    .explorer {
+      position: relative;
+      padding: 22px 18px;
+      background: #15161b;
+      border-right: 1px solid var(--line);
+    }
+
+    .explorer-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 38px;
+      padding: 0 8px 0 10px;
+      color: #d5d7dd;
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .toolbar { display: flex; gap: 8px; color: #7d828d; }
+    .tool { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; }
+
+    .tree { margin-top: 8px; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 42px;
+      padding: 0 12px;
+      border-radius: 9px;
+      color: #cfd2d9;
+      font-size: 16px;
+      letter-spacing: -.01em;
+    }
+    .row.folder {
+      color: white;
+      font-weight: 650;
+      background: rgba(255, 255, 255, .055);
+      outline: 1px solid rgba(255, 255, 255, .07);
+    }
+    .row.child { padding-left: 44px; }
+    .chevron { color: #7f8490; font-size: 14px; }
+    .folder-icon { width: 18px; height: 14px; border: 2px solid #aeb3bf; border-radius: 3px; opacity: .85; }
+    .doc-icon { width: 14px; height: 17px; border: 1.7px solid #737986; border-radius: 2px; opacity: .9; }
+    .tree-rule { margin-left: auto; color: var(--accent); font-size: 12px; font-weight: 700; }
+
+    .content {
+      display: grid;
+      place-items: center;
+      padding: 56px;
+      background:
+        linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
+        #1a1b20;
+      background-size: 32px 32px;
+    }
+
+    .message { max-width: 470px; }
+    .eyebrow { color: var(--accent); font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 14px 0 16px; font-size: 44px; line-height: 1.04; letter-spacing: -.045em; }
+    .message p { margin: 0; color: #a9aeba; font-size: 19px; line-height: 1.55; }
+    .chips { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 28px; }
+    .chip { padding: 9px 12px; border: 1px solid #343742; border-radius: 999px; color: #c7cad2; font-size: 13px; background: rgba(255,255,255,.035); }
+
+    .menu {
+      position: absolute;
+      z-index: 10;
+      width: 250px;
+      padding: 8px;
+      border: 1px solid #3a3d47;
+      border-radius: 11px;
+      background: rgba(32, 34, 41, .98);
+      box-shadow: 0 18px 45px rgba(0,0,0,.48);
+      font-size: 14px;
+    }
+    .menu.one { left: 170px; top: 96px; }
+    .menu.two { left: 410px; top: 228px; width: 226px; }
+    .menu.three { left: 626px; top: 228px; width: 240px; }
+    .menu-row { height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 7px; color: #e3e5ea; white-space: nowrap; }
+    .menu-row .arrow { margin-left: auto; color: #9297a2; }
+    .menu-row.active { background: #5b3cc4; color: white; }
+    .menu-row.disabled { color: #676b75; }
+    .separator { height: 1px; background: #393c45; margin: 6px 3px; }
+
+    .cursor {
+      position: absolute;
+      z-index: 30;
+      width: 22px;
+      height: 28px;
+      filter: drop-shadow(0 3px 4px rgba(0,0,0,.45));
+    }
+    .cursor::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: white;
+      clip-path: polygon(0 0, 0 88%, 25% 68%, 42% 100%, 57% 92%, 41% 62%, 70% 60%);
+    }
+
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: 34px;
+      transform: translateX(-50%);
+      padding: 11px 16px;
+      border: 1px solid rgba(167, 139, 250, .4);
+      border-radius: 10px;
+      background: rgba(35, 28, 57, .96);
+      color: #e8e0ff;
+      font-size: 14px;
+      font-weight: 650;
+      box-shadow: 0 12px 32px rgba(0,0,0,.35);
+    }
+
+    .stage-1 .menu, .stage-1 .cursor, .stage-1 .toast { display: none; }
+    .stage-2 .menu.two, .stage-2 .menu.three, .stage-2 .toast { display: none; }
+    .stage-2 .cursor { left: 365px; top: 340px; }
+    .stage-3 .menu.three, .stage-3 .toast { display: none; }
+    .stage-3 .cursor { left: 573px; top: 272px; }
+    .stage-4 .toast { display: none; }
+    .stage-4 .cursor { left: 792px; top: 306px; }
+    .stage-5 .menu, .stage-5 .cursor { display: none; }
+
+    .stage-5 .row.folder { outline-color: rgba(167, 139, 250, .7); background: rgba(139, 92, 246, .11); }
+  </style>
+</head>
+<body>
+  <main class="stage" id="stage">
+    <header class="titlebar">
+      <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+      <span class="window-title">Workbench Explorer Sort — Obsidian</span>
+    </header>
+    <div class="workspace">
+      <section class="explorer">
+        <div class="explorer-head"><span>Files</span><div class="toolbar"><span class="tool">＋</span><span class="tool">⌄</span><span class="tool">⋯</span></div></div>
+        <div class="tree">
+          <div class="row folder"><span class="chevron">⌄</span><span class="folder-icon"></span><span>Project Notes</span><span class="tree-rule" id="rule"></span></div>
+          <div id="items"></div>
+        </div>
+
+        <div class="menu one">
+          <div class="menu-row">New note</div>
+          <div class="menu-row">New folder</div>
+          <div class="separator"></div>
+          <div class="menu-row">Search in folder</div>
+          <div class="menu-row" id="sort-row">Sort rules <span class="arrow">›</span></div>
+          <div class="separator"></div>
+          <div class="menu-row">Rename…</div>
+        </div>
+        <div class="menu two">
+          <div class="menu-row" id="name-row">Name <span class="arrow">›</span></div>
+          <div class="menu-row">Created time <span class="arrow">›</span></div>
+          <div class="menu-row">Modified time <span class="arrow">›</span></div>
+          <div class="separator"></div>
+          <div class="menu-row disabled">Clear sort rule</div>
+        </div>
+        <div class="menu three">
+          <div class="menu-row">Ascending A → Z</div>
+          <div class="menu-row active">Descending Z → A</div>
+        </div>
+        <div class="cursor"></div>
+      </section>
+
+      <section class="content">
+        <div class="message">
+          <div class="eyebrow">Workbench Explorer Sort</div>
+          <h1>Sort any folder, right where you work.</h1>
+          <p>Choose a rule from the native context menu. The folder stays organized automatically.</p>
+          <div class="chips"><span class="chip">Per-folder rules</span><span class="chip">Local by default</span><span class="chip">No extra view</span></div>
+        </div>
+      </section>
+    </div>
+    <div class="toast">Project Notes now sorts Z → A</div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const step = Number(params.get('step') || 1);
+    const stage = document.getElementById('stage');
+    stage.classList.add(`stage-${step}`);
+    if (step >= 3) document.getElementById('sort-row').classList.add('active');
+    if (step >= 4) document.getElementById('name-row').classList.add('active');
+
+    const items = step >= 5 ? ['Delta', 'Charlie', 'Bravo', 'Alpha'] : ['Alpha', 'Bravo', 'Charlie', 'Delta'];
+    document.getElementById('items').innerHTML = items.map(name => `<div class="row child"><span class="doc-icon"></span><span>${name}</span></div>`).join('');
+    if (step >= 5) document.getElementById('rule').textContent = 'Z → A';
+  </script>
+</body>
+</html>

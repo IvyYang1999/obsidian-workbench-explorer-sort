@@ -5,47 +5,43 @@ import {
   Notice,
   Plugin,
   PluginSettingTab,
-  Setting,
+  SettingDefinition,
+  SettingDefinitionItem,
   TAbstractFile,
   TFile,
   TFolder,
 } from "obsidian";
+import {
+  normalizePath,
+  removeRulePaths,
+  remapRulePaths,
+  sanitizeSettings,
+  type PluginSettings,
+  type SortMode,
+  type SortRule,
+} from "./rules";
+import { compareItems as compareSortableItems, type SortableItem } from "./sorting";
 
 /* ═══════════════════════════════════════════════════════════════════════
    Types
    ═══════════════════════════════════════════════════════════════════════ */
 
-type SortMode =
-  | "name-asc"
-  | "name-desc"
-  | "ctime-desc"
-  | "ctime-asc"
-  | "mtime-desc"
-  | "mtime-asc";
-
-interface SortRule {
-  mode: SortMode;
-}
-
-interface PluginSettings {
-  rules: Record<string, SortRule>;
-}
-
-interface SortableItem {
-  name: string;
-  ctime: number;
-  mtime: number;
-  originalIndex: number;
-}
-
 interface FileTreeItem {
   file: TAbstractFile;
 }
 
+type GetSortedFolderItems = (
+  this: FileExplorerView,
+  folder: TFolder
+) => FileTreeItem[];
+
 interface FileExplorerView {
-  getSortedFolderItems(folder: TFolder): FileTreeItem[];
+  getSortedFolderItems: GetSortedFolderItems;
   requestSort(): void;
-  sort?: () => void;
+}
+
+interface FileExplorerPrototype {
+  getSortedFolderItems: GetSortedFolderItems;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -90,9 +86,12 @@ const TEXT: Record<
     clearedRule: (folder: string) => string;
     setRule: (folder: string, label: string) => string;
     settingsDesc: string;
+    settingsHelp: string;
     configuredRules: string;
-    ruleCount: (count: number) => string;
-    clear: string;
+    noRules: string;
+    noRulesDesc: string;
+    removeRule: string;
+    saveFailed: string;
     vaultRoot: string;
   }
 > = {
@@ -109,9 +108,12 @@ const TEXT: Record<
     clearedRule: (folder) => `Cleared sort rule: ${folder}`,
     setRule: (folder, label) => `Sort rule: ${folder} → ${label}`,
     settingsDesc: "Right-click a folder → Sort rules to set how that folder is sorted.",
-    configuredRules: "Configured rules",
-    ruleCount: (count) => `${count} folder rule${count === 1 ? "" : "s"}.`,
-    clear: "Clear",
+    settingsHelp: "Set rules from the File Explorer",
+    configuredRules: "Folder rules",
+    noRules: "No folder rules yet",
+    noRulesDesc: "Right-click a folder in the File Explorer to add one.",
+    removeRule: "Remove rule",
+    saveFailed: "Could not save folder rules.",
     vaultRoot: "Vault root",
   },
   zh: {
@@ -127,14 +129,15 @@ const TEXT: Record<
     clearedRule: (folder) => `已清除排序规则：${folder}`,
     setRule: (folder, label) => `排序规则：${folder} → ${label}`,
     settingsDesc: "右键文件夹 → 排序规则，可设置该文件夹的排序方式。",
-    configuredRules: "已配置规则",
-    ruleCount: (count) => `${count} 个文件夹规则。`,
-    clear: "清除",
+    settingsHelp: "从文件列表设置规则",
+    configuredRules: "文件夹规则",
+    noRules: "尚无文件夹规则",
+    noRulesDesc: "在文件列表中右键文件夹即可添加。",
+    removeRule: "移除规则",
+    saveFailed: "无法保存文件夹规则。",
     vaultRoot: "库根目录",
   },
 };
-
-const LOG = "[WorkbenchSort]";
 
 /* ═══════════════════════════════════════════════════════════════════════
    Plugin
@@ -143,10 +146,11 @@ const LOG = "[WorkbenchSort]";
 export default class WorkbenchExplorerSortPlugin extends Plugin {
   settings: PluginSettings = DEFAULT_SETTINGS;
   private unpatchExplorer: (() => void) | null = null;
+  private settingsMutation: Promise<void> = Promise.resolve();
 
   /* ── Lifecycle ─────────────────────────────────────────────────────── */
 
-  async onload() {
+  async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new SortSettingTab(this.app, this));
 
@@ -162,43 +166,78 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
     );
 
     this.registerEvent(this.app.vault.on("create", () => this.triggerSort()));
-    this.registerEvent(this.app.vault.on("rename", () => this.triggerSort()));
-    this.registerEvent(this.app.vault.on("delete", () => this.triggerSort()));
+    this.registerEvent(
+      this.app.vault.on("rename", async (file, oldPath) => {
+        if (file instanceof TFolder) {
+          await this.updateRules((rules) =>
+            remapRulePaths(rules, oldPath, file.path)
+          );
+        }
+        this.triggerSort();
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("delete", async (file) => {
+        if (file instanceof TFolder) {
+          await this.updateRules((rules) => removeRulePaths(rules, file.path));
+        }
+        this.triggerSort();
+      })
+    );
 
     this.app.workspace.onLayoutReady(() => {
       this.patchFileExplorer();
       this.triggerSort();
     });
-
-    console.log(LOG, "loaded");
   }
 
-  onunload() {
+  onunload(): void {
     this.unpatchExplorer?.();
     this.unpatchExplorer = null;
-    console.log(LOG, "unloaded");
   }
 
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this.settings.rules ??= {};
+  async loadSettings(): Promise<void> {
+    const stored: unknown = await this.loadData();
+    this.settings = sanitizeSettings(stored);
   }
 
-  async saveSettings() {
+  async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  private updateRules(
+    update: (rules: Record<string, SortRule>) => Record<string, SortRule>
+  ): Promise<void> {
+    const operation = this.settingsMutation.then(async () => {
+      const rules = update(this.settings.rules);
+      if (rules === this.settings.rules) return;
+      this.settings = { rules };
+      await this.saveSettings();
+    });
+    this.settingsMutation = operation.catch(() => {
+      new Notice(text().saveFailed);
+    });
+    return operation;
   }
 
   /* ── Rule management ───────────────────────────────────────────────── */
 
-  async setRule(folderPath: string, rule: SortRule) {
-    this.settings.rules[norm(folderPath)] = rule;
-    await this.saveSettings();
+  async setRule(folderPath: string, rule: SortRule): Promise<void> {
+    await this.updateRules((rules) => ({
+      ...rules,
+      [normalizePath(folderPath)]: rule,
+    }));
     this.triggerSort();
   }
 
-  async clearRule(folderPath: string) {
-    delete this.settings.rules[norm(folderPath)];
-    await this.saveSettings();
+  async clearRule(folderPath: string): Promise<void> {
+    await this.updateRules((rules) => {
+      const key = normalizePath(folderPath);
+      if (!(key in rules)) return rules;
+      const next = { ...rules };
+      delete next[key];
+      return next;
+    });
     this.triggerSort();
   }
 
@@ -207,8 +246,8 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
   private addSortMenu(menu: Menu, file: TAbstractFile) {
     const folderPath =
       file instanceof TFolder
-        ? norm(file.path)
-        : norm(file.parent?.path ?? "");
+        ? normalizePath(file.path)
+        : normalizePath(file.parent?.path ?? "");
     const current = this.settings.rules[folderPath];
 
     menu.addItem((item) => {
@@ -298,44 +337,43 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
 
   /* ── File Explorer patching ────────────────────────────────────────── */
 
-  private patchFileExplorer() {
+  private patchFileExplorer(): void {
     if (this.unpatchExplorer) return;
 
     const view = this.getExplorerView();
     if (!view) return;
 
-    const proto = Object.getPrototypeOf(view) as FileExplorerView;
+    const candidate: unknown = Object.getPrototypeOf(view);
+    if (!isFileExplorerPrototype(candidate)) return;
+    const proto = candidate;
     const original = proto.getSortedFolderItems;
-    if (typeof original !== "function") return;
-
-    const plugin = this;
-    proto.getSortedFolderItems = function (folder: TFolder): FileTreeItem[] {
+    const getRule = (folderPath: string): SortRule | undefined =>
+      this.settings.rules[normalizePath(folderPath)];
+    const replacement: GetSortedFolderItems = function (
+      this: FileExplorerView,
+      folder: TFolder
+    ): FileTreeItem[] {
       const items = original.call(this, folder);
-      const rule = plugin.settings.rules[norm(folder.path)];
+      const rule = getRule(folder.path);
       if (!rule) return items;
       return sortFileTreeItems(items, rule);
     };
+    proto.getSortedFolderItems = replacement;
 
     this.unpatchExplorer = () => {
-      proto.getSortedFolderItems = original;
+      if (proto.getSortedFolderItems === replacement) {
+        proto.getSortedFolderItems = original;
+      }
     };
-    console.log(LOG, "explorer patched");
   }
 
   private getExplorerView(): FileExplorerView | null {
     const leaf = this.app.workspace.getLeavesOfType("file-explorer")[0];
-    const v = leaf?.view as unknown;
-    if (
-      v &&
-      typeof (v as FileExplorerView).getSortedFolderItems === "function" &&
-      typeof (v as FileExplorerView).requestSort === "function"
-    ) {
-      return v as FileExplorerView;
-    }
-    return null;
+    const view: unknown = leaf?.view;
+    return isFileExplorerView(view) ? view : null;
   }
 
-  private triggerSort() {
+  private triggerSort(): void {
     this.patchFileExplorer();
     const view = this.getExplorerView();
     if (view) {
@@ -348,10 +386,6 @@ export default class WorkbenchExplorerSortPlugin extends Plugin {
    Standalone helpers
    ═══════════════════════════════════════════════════════════════════════ */
 
-function norm(path: string): string {
-  return path === "/" ? "" : path.replace(/^\/+|\/+$/g, "");
-}
-
 function displayFolder(path: string): string {
   return path || text().vaultRoot;
 }
@@ -359,6 +393,22 @@ function displayFolder(path: string): string {
 function extractSubmenu(item: unknown): Menu | null {
   const c = item as { setSubmenu?: () => Menu };
   return typeof c.setSubmenu === "function" ? c.setSubmenu() : null;
+}
+
+function isFileExplorerView(value: unknown): value is FileExplorerView {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.getSortedFolderItems === "function" &&
+    typeof candidate.requestSort === "function"
+  );
+}
+
+function isFileExplorerPrototype(
+  value: unknown
+): value is FileExplorerPrototype {
+  if (typeof value !== "object" || value === null) return false;
+  return typeof (value as Record<string, unknown>).getSortedFolderItems === "function";
 }
 
 function locale(): Locale {
@@ -381,7 +431,7 @@ function sortFileTreeItems(
 ): FileTreeItem[] {
   return items
     .map((item, idx) => ({ item, s: toSortable(item.file, idx) }))
-    .sort((a, b) => compareItems(a.s, b.s, rule))
+    .sort((a, b) => compareSortableItems(a.s, b.s, rule.mode))
     .map(({ item }) => item);
 }
 
@@ -393,48 +443,6 @@ function toSortable(file: TAbstractFile, idx: number): SortableItem {
     mtime: stats.mtime,
     originalIndex: idx,
   };
-}
-
-function compareItems(
-  a: SortableItem,
-  b: SortableItem,
-  rule: SortRule
-): number {
-  return compareByMode(a, b, rule.mode);
-}
-
-function compareByMode(
-  a: SortableItem,
-  b: SortableItem,
-  mode: SortMode
-): number {
-  switch (mode) {
-    case "name-asc":
-      return cmpName(a, b);
-    case "name-desc":
-      return cmpName(b, a);
-    case "ctime-desc":
-      return cmpNum(b.ctime, a.ctime) || cmpName(a, b);
-    case "ctime-asc":
-      return cmpNum(a.ctime, b.ctime) || cmpName(a, b);
-    case "mtime-desc":
-      return cmpNum(b.mtime, a.mtime) || cmpName(a, b);
-    case "mtime-asc":
-      return cmpNum(a.mtime, b.mtime) || cmpName(a, b);
-    default:
-      return a.originalIndex - b.originalIndex;
-  }
-}
-
-function cmpName(a: SortableItem, b: SortableItem): number {
-  return a.name.localeCompare(b.name, undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function cmpNum(a: number, b: number): number {
-  return a === b ? 0 : a < b ? -1 : 1;
 }
 
 function getStats(file: TAbstractFile): { ctime: number; mtime: number } {
@@ -463,29 +471,34 @@ class SortSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.createEl("h2", { text: "Workbench Explorer Sort" });
-    containerEl.createEl("p", {
-      text: text().settingsDesc,
-    });
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    const labels = text();
+    const rules = Object.entries(this.plugin.settings.rules).sort(([a], [b]) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    );
 
-    const rules = Object.entries(this.plugin.settings.rules);
-    new Setting(containerEl)
-      .setName(text().configuredRules)
-      .setDesc(text().ruleCount(rules.length));
+    const items: SettingDefinition[] =
+      rules.length === 0
+        ? [{ name: labels.noRules, desc: labels.noRulesDesc }]
+        : rules.map(([folder, rule]) => ({
+            name: displayFolder(folder),
+            desc: modeLabel(rule.mode),
+            render: (setting) => {
+              setting.addExtraButton((button) =>
+                button
+                  .setIcon("trash-2")
+                  .setTooltip(labels.removeRule)
+                  .onClick(async () => {
+                    await this.plugin.clearRule(folder);
+                    this.update();
+                  })
+              );
+            },
+          }));
 
-    for (const [folder, rule] of rules) {
-      new Setting(containerEl)
-        .setName(displayFolder(folder))
-        .setDesc(modeLabel(rule.mode))
-        .addButton((btn) =>
-          btn.setButtonText(text().clear).onClick(async () => {
-            await this.plugin.clearRule(folder);
-            this.display();
-          })
-        );
-    }
+    return [
+      { name: labels.settingsHelp, desc: labels.settingsDesc },
+      { type: "group", heading: labels.configuredRules, items },
+    ];
   }
 }

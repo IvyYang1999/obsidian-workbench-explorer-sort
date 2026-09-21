@@ -27,7 +27,7 @@ jobs:
         run: npm ci
 
       - name: Build plugin
-        run: npm run build
+        run: npm run check
 
       - name: Attest release assets
         uses: actions/attest-build-provenance@v2
@@ -36,6 +36,7 @@ jobs:
             main.js
             manifest.json
             styles.css
+            cli.js
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -44,3 +45,5 @@ jobs:
             main.js
             manifest.json
             styles.css
+            cli.js
+          generate_release_notes: true
