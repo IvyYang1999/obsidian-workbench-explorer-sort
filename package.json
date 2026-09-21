@@ -1,6 +1,6 @@
 {
   "name": "obsidian-workbench-explorer-sort",
-  "version": "0.1.4",
+  "version": "1.0.0",
   "private": true,
   "description": "Direct, rule-based sorting for the file explorer.",
   "main": "main.js",

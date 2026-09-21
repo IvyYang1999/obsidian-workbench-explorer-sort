@@ -2,7 +2,7 @@
 
 All notable changes to Workbench Explorer Sort are documented here.
 
-## Unreleased
+## 1.0.0 - 2026-09-21
 
 ### Added
 
@@ -20,4 +20,5 @@ All notable changes to Workbench Explorer Sort are documented here.
 ### Fixed
 
 - Invalid saved rule data is ignored safely.
+- File Explorer patch detection no longer skips custom sorting silently.
 - Plugin unload no longer overwrites a newer File Explorer method replacement.
